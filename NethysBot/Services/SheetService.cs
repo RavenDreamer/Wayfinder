@@ -281,7 +281,7 @@ namespace NethysBot.Services
 			sb.AppendLine("Lv" + (string)full["level"] + (((string)full["ancestry"]).NullorEmpty() ? "" : " " + (string)full["ancestry"]) + (full["classes"].HasValues ? " " + (string)full["classes"][0]["name"] : " Adventurer"));
 			sb.AppendLine(Icons.Sheet["hp"] + " HP `" + ((int)(values?["hp"]["value"]??0) - (int)(full["damage"] ?? 0)) + "/" + (values?["hp"]["value"] ?? 0) + "`");
 			sb.AppendLine(Icons.Sheet["ac"] + " AC `" + (values?["armor class"]["value"]??"Unknown") + "`");
-			sb.AppendLine(Icons.Sheet["per"] + " Perception `" + ((int)(values?["perception"]["bonus"]??0)).ToModifierString() + "` (DC " + (values["perception"]["value"]??"Unknown") + ")");
+			sb.AppendLine(Icons.Sheet["per"] + " Perception `" + ((int)(values?["perception"]["bonus"]??0)).ToModifierString() + "` (DC " + (values["perception dc"]["value"]??"Unknown") + ")");
 
 			embed.WithDescription(sb.ToString());
 			sb.Clear();
@@ -293,7 +293,7 @@ namespace NethysBot.Services
 				foreach (var cl in classes)
 				{
 					string ability = ((string)cl["ability"]).NullorEmpty() ? "" : Icons.Scores[(string)cl["ability"]] + " ";
-					sb.AppendLine(ability + ((string)cl["name"]).Uppercase() + " " + Icons.Proficiency[(string)cl["proficiency"]] + (c.Type == SheetType.Character?" (Class DC: " + ((int)(values?[((string)cl["name"]).ToLower()]["bonus"]??0) + 10) + ")":""));
+					sb.AppendLine(ability + ((string)cl["name"]).Uppercase() + " " + Icons.Proficiency[(string)cl["proficiency"]] + (c.Type == SheetType.Character?" (Class DC: " + (int)(values?[((string)cl["name"]).ToLower()+" dc"]["value"]??0) + ")":""));
 				}
 				embed.AddField("Classes", sb.ToString());
 				sb.Clear();
@@ -322,9 +322,9 @@ namespace NethysBot.Services
 			embed.AddField("Abilities", sb.ToString(), true);
 			sb.Clear();
 
-			sb.AppendLine(Icons.Sheet["fort"] + " `" + ((int)(values?["fortitude"]?["bonus"]??0) - (int)(values["fortitude"]["penalty"]??0)).ToModifierString() + "` (DC: "+values["fortitude"]["value"]+")");
-			sb.AppendLine(Icons.Sheet["ref"] + " `" + ((int)(values?["reflex"]?["bonus"]??0) - (int)(values["reflex"]["penalty"] ?? 0)).ToModifierString() + "` (DC: " + values["reflex"]["value"] + ")");
-			sb.AppendLine(Icons.Sheet["will"] + " `" + ((int)(values?["will"]?["bonus"]??0) - (int)(values["will"]["penalty"] ?? 0)).ToModifierString() + "` (DC: " + values["will"]["value"] + ")");
+			sb.AppendLine(Icons.Sheet["fort"] + " `" + ((int)(values?["fortitude"]?["bonus"]??0) - (int)(values["fortitude"]["penalty"]??0)).ToModifierString() + "` (DC: "+values["fortitude dc"]["value"]+")");
+			sb.AppendLine(Icons.Sheet["ref"] + " `" + ((int)(values?["reflex"]?["bonus"]??0) - (int)(values["reflex"]["penalty"] ?? 0)).ToModifierString() + "` (DC: " + values["reflex dc"]["value"] + ")");
+			sb.AppendLine(Icons.Sheet["will"] + " `" + ((int)(values?["will"]?["bonus"]??0) - (int)(values["will"]["penalty"] ?? 0)).ToModifierString() + "` (DC: " + values["will dc"]["value"] + ")");
 
 			embed.AddField("Defenses", sb.ToString(), true);
 			sb.Clear();
@@ -364,13 +364,13 @@ namespace NethysBot.Services
 				{
 					if (!((string)skills[index]["lore"]).NullorEmpty())
 					{
-						int bonus = int.Parse((string)values?[((string)skills[index]["lore"]).ToLower()]["bonus"] ?? "0");
+						int bonus = int.Parse((string)values?[((string)skills[index]["lore"]).ToLower()]["bonus"] ?? "0") - int.Parse((string)values?[((string)skills[index]["lore"]).ToLower()]["penalty"] ?? "0");
 						string icon = (string)skills[index]["ability"] ?? "intelligence";
 						sb.AppendLine(Icons.Scores[icon] + " " + ((string)skills[index]["lore"]).Substring(0, Math.Min(9, ((string)skills[index]["lore"]).Length)).Uppercase() + " " + Icons.Proficiency[(string)skills[index]["proficiency"]] + " " + bonus.ToModifierString());
 					}
-					else
+					else if(!((string)skills[index]["name"]).NullorEmpty() && !((string)skills[index]["ability"]).NullorEmpty())
 					{
-						int bonus = int.Parse((string)values?[((string)skills[index]["name"]).ToLower()]["value"] ?? "0");
+						int bonus = int.Parse((string)values?[((string)skills[index]["name"]).ToLower()]["bonus"] ?? "0") - int.Parse((string)values?[((string)skills[index]["name"]).ToLower()]["penalty"] ?? "0");
 						sb.AppendLine(Icons.Scores[(string)skills[index]["ability"]] + " " + ((string)skills[index]["name"]).Substring(0, Math.Min(9, ((string)skills[index]["name"]).Length)).Uppercase() + " " + Icons.Proficiency[(string)skills[index]["proficiency"]] + " " + bonus.ToModifierString());
 					}
 					index++;
@@ -780,9 +780,13 @@ namespace NethysBot.Services
 			reqspell.EnsureSuccessStatusCode();
 			string respspell = await reqspell.Content.ReadAsStringAsync();
 
-			var reqclasses = await Client.GetAsync(Api + c.RemoteId + "/classes");
+			var reqclasses = await Client.GetAsync(Api + c.RemoteId + "/traditions");
 			reqclasses.EnsureSuccessStatusCode();
 			string resclasses = await reqclasses.Content.ReadAsStringAsync();
+
+			var reqclasses2 = await Client.GetAsync(Api + c.RemoteId + "/classes");
+			reqclasses2.EnsureSuccessStatusCode();
+			string resclasses2 = await reqclasses2.Content.ReadAsStringAsync();
 
 			var reqvalues = await Client.GetAsync(Api + c.RemoteId + "/values");
 			reqvalues.EnsureSuccessStatusCode();
@@ -791,6 +795,8 @@ namespace NethysBot.Services
 
 			var jsonspells = JObject.Parse(respspell);
 			var json = JObject.Parse(resclasses);
+			var json2 = JObject.Parse(resclasses2);
+			json.Merge(json2, new JsonMergeSettings { MergeArrayHandling = MergeArrayHandling.Union });
 			var values = JObject.Parse(resvalues)["data"];
 
 			if (values == null || !values.HasValues)
@@ -818,10 +824,17 @@ namespace NethysBot.Services
 
 			foreach (var cl in classes)
 			{
+				if (values[((string)cl["name"]).ToLower()] == null) continue;
+				bool skip = true;
+				for(int i = 0;i <= 10;i++)
+				{
+					if ((int)cl["spell" + i] > 0) skip = false;
+				}
+				if (skip) continue;
 				string ability = ((string)cl["ability"]).NullorEmpty() ? "" : Icons.Scores[(string)cl["ability"]] + " ";
 
 				sb.AppendLine(ability + ((string)cl["tradition"]).Uppercase()+ " " + Icons.Proficiency[(string)cl["proficiency"]]);
-				sb.AppendLine("Spell Attack `" + ((int)(values?[((string)cl["name"]).ToLower()]["bonus"]??0)).ToModifierString() + "`");
+				sb.AppendLine("Spell Attack `" + ((int)(values[((string)cl["name"]).ToLower()]["bonus"]??0)).ToModifierString() + "`");
 				sb.AppendLine("DC `" + (values?[((string)cl["name"]).ToLower()]["value"]??"Unknown") + "`");
 
 				embed.AddField(((string)cl["name"]??"Unnamed class"), sb.ToString(),true);
